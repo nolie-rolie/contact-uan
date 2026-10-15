@@ -8,10 +8,9 @@ from typing import TypeVar
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlBaseRunnerCfg
 
-
 _EnvCfgLike = ManagerBasedRlEnvCfg | Callable[[], ManagerBasedRlEnvCfg]
 _RlCfgLike = RslRlBaseRunnerCfg | Callable[[], RslRlBaseRunnerCfg]
-_T = TypeVar("_T")
+_T = TypeVar("_T", ManagerBasedRlEnvCfg, RslRlBaseRunnerCfg)
 
 
 @dataclass

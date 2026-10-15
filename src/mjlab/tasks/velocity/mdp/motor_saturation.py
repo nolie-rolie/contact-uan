@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -27,7 +28,7 @@ def _ids_to_tensor(
   return torch.tensor(ids, dtype=torch.long, device=device)
 
 
-def _names_from_ids(names: list[str], ids: list[int] | slice) -> list[str]:
+def _names_from_ids(names: Sequence[str], ids: list[int] | slice) -> Sequence[str]:
   if isinstance(ids, slice):
     return names[ids]
   return [names[i] for i in ids]
@@ -36,7 +37,7 @@ def _names_from_ids(names: list[str], ids: list[int] | slice) -> list[str]:
 def _resolve_named_tensor(
   value: float | dict[str, float],
   *,
-  target_names: list[str],
+  target_names: Sequence[str],
   num_envs: int,
   device: str,
   field_name: str,

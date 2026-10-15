@@ -1,5 +1,6 @@
-from deploy.sensors.base_sensor import BaseSensor
 import numpy as np
+
+from deploy.sensors.base_sensor import BaseSensor
 
 
 class FootSwingHeightCommandSensor(BaseSensor):

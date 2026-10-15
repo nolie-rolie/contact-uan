@@ -14,7 +14,7 @@ format:
 .PHONY: type
 type:
 	uv run ty check
-	uv run pyright
+	uv run --extra deploy pyright
 
 .PHONY: check
 check: format type

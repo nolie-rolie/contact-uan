@@ -1,6 +1,7 @@
 """Tests for motor saturation metrics."""
 
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
 import torch
@@ -8,6 +9,9 @@ import torch
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.velocity.mdp.metrics import motor_saturation_fraction
+
+if TYPE_CHECKING:
+  from mjlab.envs import ManagerBasedRlEnv
 
 
 def _make_env(
@@ -17,7 +21,7 @@ def _make_env(
   action_saturation_effort: float | None = None,
   action_velocity_limit: float | None = None,
   static_limits: list[float] | None = None,
-):
+) -> "ManagerBasedRlEnv":
   qfrc = torch.tensor(qfrc_actuator, dtype=torch.float32)
   vel = torch.tensor(joint_vel, dtype=torch.float32)
   num_envs, num_joints = qfrc.shape
@@ -61,7 +65,7 @@ def _make_env(
     action_manager=SimpleNamespace(get_term=Mock(return_value=action)),
     sim=SimpleNamespace(model=SimpleNamespace(actuator_forcerange=actuator_forcerange)),
   )
-  return env
+  return cast("ManagerBasedRlEnv", env)
 
 
 def test_motor_saturation_fraction_keeps_static_metric_behavior():

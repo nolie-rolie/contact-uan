@@ -145,6 +145,7 @@ indent-width = 2
 exclude = [
   "src/mjlab/utils/lab_api",
   "typings",
+  "third-party/openhomie/HomieDeploy/unitree_sdk2/lcm_types",
 ]
 
 [tool.ruff.lint]
@@ -155,7 +156,14 @@ ignore = ["B011"]
 pythonVersion = "3.10"
 venvPath = "."
 venv = ".venv"
-ignore = ["./typings", "./src/mjlab/utils/lab_api", "./docs"]
+ignore = [
+  "./typings",
+  "./src/mjlab/utils/lab_api",
+  "./docs",
+  # Generated LCM bindings; deployment callers remain checked.
+  "./third-party/openhomie/HomieDeploy/unitree_sdk2/lcm_types",
+]
+extraPaths = ["src", "third-party/openhomie/HomieDeploy/unitree_sdk2"]
 stubPath = "typings"
 
 [tool.ty.environment]
