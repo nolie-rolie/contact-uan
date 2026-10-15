@@ -38,6 +38,7 @@ class VideoRecorder(ManagerBasedRlEnv):
           If set, records exactly that many frames regardless of episode boundaries.
       name_prefix: Prefix for video filenames.
       disable_logger: Whether to disable logging.
+      on_video_saved: Optional callback invoked with the saved video path.
   """
 
   def __init__(
@@ -49,6 +50,7 @@ class VideoRecorder(ManagerBasedRlEnv):
     video_length: int | None = None,
     name_prefix: str = "rl-video",
     disable_logger: bool = False,
+    on_video_saved: Callable[[Path], None] | None = None,
   ):
     # Don't call super().__init__() - we're wrapping an existing env.
     self._wrapped_env = env
@@ -60,6 +62,7 @@ class VideoRecorder(ManagerBasedRlEnv):
     self.video_length = video_length
     self.name_prefix = name_prefix
     self.disable_logger = disable_logger
+    self.on_video_saved = on_video_saved
 
     self.step_count: int = 0
     self.episode_count: int = 0  # Tracks actual episodes
@@ -182,6 +185,7 @@ class VideoRecorder(ManagerBasedRlEnv):
   def _finish_recording(self) -> None:
     """Finish recording and save the video."""
     if self.current_video_frames:
+      assert self.current_video_path is not None
       # Convert frames to uint8 format.
       video_frames = []
       for frame in self.current_video_frames:
@@ -192,9 +196,13 @@ class VideoRecorder(ManagerBasedRlEnv):
 
       fps = self._wrapped_env.metadata.get("render_fps", 30)
       media.write_video(str(self.current_video_path), video_frames, fps=fps)
+      saved_path = self.current_video_path
 
       if not self.disable_logger:
-        print(f"[INFO] Saved video to {self.current_video_path}")
+        print(f"[INFO] Saved video to {saved_path}")
+
+      if self.on_video_saved is not None:
+        self.on_video_saved(saved_path)
 
     self.is_recording = False
     self.current_video_frames = []

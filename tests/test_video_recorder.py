@@ -75,3 +75,29 @@ def test_accepts_string_path(tmp_path: Path):
   recorder.close()
 
   assert list(Path(folder).glob("*.mp4"))
+
+
+def test_calls_on_video_saved(tmp_path: Path):
+  """VideoRecorder invokes the save callback with the mp4 path."""
+  from mjlab.utils.wrappers.video_recorder import VideoRecorder
+
+  env = _make_mock_env()
+  on_video_saved = Mock()
+  recorder = VideoRecorder(
+    env,
+    video_folder=tmp_path,
+    step_trigger=lambda step: step == 0,
+    video_length=2,
+    disable_logger=True,
+    on_video_saved=on_video_saved,
+  )
+
+  action = torch.zeros(1)
+  for _ in range(3):
+    recorder.step(action)
+
+  recorder.close()
+
+  videos = list(tmp_path.glob("*.mp4"))
+  assert len(videos) == 1
+  on_video_saved.assert_called_once_with(videos[0])

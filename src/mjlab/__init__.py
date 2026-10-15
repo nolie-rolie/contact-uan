@@ -1,6 +1,4 @@
 import os
-import sys
-import traceback
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -33,6 +31,20 @@ def _configure_warp() -> None:
   wp.config.quiet = quiet
 
 
+def _configure_mujoco_warp_compat() -> None:
+  """Patch small MuJoCo enum skew before importing mujoco_warp.
+
+  Some MuJoCo wheels omit ``mjENBL_MULTICCD`` while recent mujoco_warp imports
+  reference it unconditionally. The release does not enable this optional bit,
+  so aliasing it to an inert existing enum member keeps imports working across
+  the supported local wheel set.
+  """
+  import mujoco
+
+  if not hasattr(mujoco.mjtEnableBit, "mjENBL_MULTICCD"):
+    mujoco.mjtEnableBit.mjENBL_MULTICCD = mujoco.mjtEnableBit.mjNENABLE
+
+
 def _import_registered_packages() -> None:
   """Auto-discover and import packages registered via entry points.
 
@@ -44,12 +56,8 @@ def _import_registered_packages() -> None:
   for entry_point in mjlab_tasks:
     try:
       entry_point.load()
-    except Exception:
-      print(
-        f"[WARN] Failed to load task package '{entry_point.name}' ({entry_point.value}):",
-        file=sys.stderr,
-      )
-      traceback.print_exc(file=sys.stderr)
+    except Exception as e:
+      print(f"[WARN] Failed to load task package {entry_point.name}: {e}")
 
 
 def _configure_mediapy() -> None:
@@ -61,5 +69,6 @@ def _configure_mediapy() -> None:
 
 
 _configure_warp()
+_configure_mujoco_warp_compat()
 _configure_mediapy()
 _import_registered_packages()

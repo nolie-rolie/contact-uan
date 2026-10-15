@@ -36,6 +36,20 @@ class RslRlModelCfg:
   """Number of stacked RNN layers."""
   class_name: str = "MLPModel"
   """Model class name resolved by RSL-RL (MLPModel, CNNModel, or RNNModel)."""
+  num_actuators: int | None = None
+  """Optional UANActor actuator count. Removed when unset for standard models."""
+  joint_to_actuator_map: list[int] | None = None
+  """Optional UANActor joint-to-actuator map."""
+  history_length: int | None = None
+  """Optional UANActor history length."""
+  num_blocks: int | None = None
+  """Optional UANActor per-step observation block count."""
+  use_bias: bool | None = None
+  """Optional UANActor bias setting."""
+  final_layer_init_uniform: float | None = None
+  """Optional UANActor final-layer uniform initialization bound."""
+  final_layer_bias_zero: bool | None = None
+  """Optionally zero UANActor final-layer biases after initialization."""
 
 
 @dataclass
@@ -95,9 +109,8 @@ class RslRlBaseRunnerCfg:
   save_interval: int = 50
   """The number of iterations between saves."""
   experiment_name: str = "exp1"
-  """Directory name used to group runs under ``{log_root}/{experiment_name}/``.
-  The log root defaults to ``logs/rsl_rl`` and can be overridden with
-  ``--log-root`` on the CLI."""
+  """Directory name used to group runs under
+  ``logs/rsl_rl/{experiment_name}/``."""
   run_name: str = ""
   """Optional label appended to the timestamped run directory
   (e.g. ``2025-01-27_14-30-00_{run_name}``). Also becomes the

@@ -2,7 +2,10 @@
 
 import pytest
 
-from mjlab.asset_zoo.robots import G1_ACTION_SCALE, GO1_ACTION_SCALE
+from mjlab.asset_zoo.robots import (
+  G1_ACTION_SCALE,
+  GO1_ACTION_SCALE,
+)
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.tasks.registry import list_tasks, load_env_cfg
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
@@ -197,3 +200,12 @@ def test_go1_velocity_has_correct_action_scale(
     assert joint_pos_action.scale == GO1_ACTION_SCALE, (
       f"Task {task_id} action scale mismatch, expected GO1_ACTION_SCALE"
     )
+
+
+def test_velocity_tasks_do_not_have_motor_saturation_reward(
+  velocity_task_ids: list[str],
+) -> None:
+  for task_id in velocity_task_ids:
+    cfg = load_env_cfg(task_id)
+
+    assert "motor_saturation" not in cfg.rewards

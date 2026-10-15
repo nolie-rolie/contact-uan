@@ -1,0 +1,21 @@
+struct rc_command_v2_lcmt
+{
+    float left_stick[2];
+    float right_stick[2];
+    int16_t R1;
+    int16_t L1;
+    int16_t start;
+    int16_t select;
+    int16_t R2;
+    int16_t L2;
+    int16_t F1;
+    int16_t F2;
+    int16_t A;
+    int16_t B;
+    int16_t X;
+    int16_t Y;
+    int16_t up;
+    int16_t right;
+    int16_t down;
+    int16_t left;
+}

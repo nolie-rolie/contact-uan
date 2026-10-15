@@ -6,6 +6,8 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.tasks.registry import list_tasks, load_env_cfg
 
+_REPLAY_ROLLOUT_TASK_PREFIX = "Mjlab-UAN-Rollout"
+
 
 @pytest.fixture(scope="module")
 def all_task_ids() -> list[str]:
@@ -40,6 +42,8 @@ def test_all_tasks_have_play_config(all_task_ids: list[str]) -> None:
 def test_play_mode_episode_length(all_task_ids: list[str]) -> None:
   """Play mode tasks should have infinite episode length."""
   for task_id in all_task_ids:
+    if task_id.startswith(_REPLAY_ROLLOUT_TASK_PREFIX):
+      continue
     cfg = load_env_cfg(task_id, play=True)
     assert cfg.episode_length_s >= 1e9, (
       f"{task_id} (play mode) episode_length_s={cfg.episode_length_s}, expected >= 1e9"
@@ -68,6 +72,8 @@ def test_play_mode_observation_corruption_disabled(all_task_ids: list[str]) -> N
 def test_training_mode_observation_corruption_enabled(all_task_ids: list[str]) -> None:
   """Training mode tasks should have observation corruption enabled for policy."""
   for task_id in all_task_ids:
+    if task_id.startswith(_REPLAY_ROLLOUT_TASK_PREFIX):
+      continue
     cfg = load_env_cfg(task_id)
 
     assert "actor" in cfg.observations, (

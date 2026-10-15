@@ -1,5 +1,7 @@
 """Unitree G1 constants."""
 
+import re
+from collections.abc import Sequence
 from pathlib import Path
 
 import mujoco
@@ -23,8 +25,19 @@ G1_XML: Path = (
 assert G1_XML.exists()
 
 
+def get_assets(meshdir: str) -> dict[str, bytes]:
+  assets: dict[str, bytes] = {}
+  asset_dir = G1_XML.parent / "assets"
+  for path in asset_dir.glob("*"):
+    if path.is_file():
+      assets[f"{meshdir}/{path.name}" if meshdir else path.name] = path.read_bytes()
+  return assets
+
+
 def get_spec() -> mujoco.MjSpec:
-  return mujoco.MjSpec.from_file(str(G1_XML))
+  spec = mujoco.MjSpec.from_file(str(G1_XML))
+  spec.assets = get_assets(spec.meshdir)
+  return spec
 
 
 ##
@@ -109,6 +122,44 @@ ACTUATOR_4010 = ElectricActuator(
   effort_limit=5.0,
 )
 
+G1_TORQUE_SPEED_SATURATION_EFFORT: dict[str, float] = {
+  ".*_elbow_joint": ACTUATOR_5020.effort_limit,
+  ".*_shoulder_pitch_joint": ACTUATOR_5020.effort_limit,
+  ".*_shoulder_roll_joint": ACTUATOR_5020.effort_limit,
+  ".*_shoulder_yaw_joint": ACTUATOR_5020.effort_limit,
+  ".*_wrist_roll_joint": ACTUATOR_5020.effort_limit,
+  ".*_hip_pitch_joint": ACTUATOR_7520_14.effort_limit,
+  ".*_hip_yaw_joint": ACTUATOR_7520_14.effort_limit,
+  "waist_yaw_joint": ACTUATOR_7520_14.effort_limit,
+  ".*_hip_roll_joint": ACTUATOR_7520_22.effort_limit,
+  ".*_knee_joint": ACTUATOR_7520_22.effort_limit,
+  ".*_wrist_pitch_joint": ACTUATOR_4010.effort_limit,
+  ".*_wrist_yaw_joint": ACTUATOR_4010.effort_limit,
+  "waist_pitch_joint": ACTUATOR_5020.effort_limit * 2,
+  "waist_roll_joint": ACTUATOR_5020.effort_limit * 2,
+  ".*_ankle_pitch_joint": ACTUATOR_5020.effort_limit * 2,
+  ".*_ankle_roll_joint": ACTUATOR_5020.effort_limit * 2,
+}
+
+G1_TORQUE_SPEED_VELOCITY_LIMIT: dict[str, float] = {
+  ".*_elbow_joint": ACTUATOR_5020.velocity_limit,
+  ".*_shoulder_pitch_joint": ACTUATOR_5020.velocity_limit,
+  ".*_shoulder_roll_joint": ACTUATOR_5020.velocity_limit,
+  ".*_shoulder_yaw_joint": ACTUATOR_5020.velocity_limit,
+  ".*_wrist_roll_joint": ACTUATOR_5020.velocity_limit,
+  ".*_hip_pitch_joint": ACTUATOR_7520_14.velocity_limit,
+  ".*_hip_yaw_joint": ACTUATOR_7520_14.velocity_limit,
+  "waist_yaw_joint": ACTUATOR_7520_14.velocity_limit,
+  ".*_hip_roll_joint": ACTUATOR_7520_22.velocity_limit,
+  ".*_knee_joint": ACTUATOR_7520_22.velocity_limit,
+  ".*_wrist_pitch_joint": ACTUATOR_4010.velocity_limit,
+  ".*_wrist_yaw_joint": ACTUATOR_4010.velocity_limit,
+  "waist_pitch_joint": ACTUATOR_5020.velocity_limit,
+  "waist_roll_joint": ACTUATOR_5020.velocity_limit,
+  ".*_ankle_pitch_joint": ACTUATOR_5020.velocity_limit,
+  ".*_ankle_roll_joint": ACTUATOR_5020.velocity_limit,
+}
+
 NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10Hz
 DAMPING_RATIO = 2.0
 
@@ -176,6 +227,101 @@ G1_ACTUATOR_ANKLE = BuiltinPositionActuatorCfg(
   effort_limit=ACTUATOR_5020.effort_limit * 2,
   armature=ACTUATOR_5020.reflected_inertia * 2,
 )
+
+G1_UAN_ACTUATOR_GROUP_NAMES = (
+  "g1_5020_arms",
+  "g1_7520_14",
+  "g1_7520_22",
+  "g1_4010",
+  "g1_5020_doubled_linkage",
+)
+
+# Native MuJoCo order: left leg, right leg, waist, left arm, right arm.
+G1_UAN_JOINT_TO_ACTUATOR_MAP = (
+  1,
+  2,
+  1,
+  2,
+  4,
+  4,
+  1,
+  2,
+  1,
+  2,
+  4,
+  4,
+  1,
+  4,
+  4,
+  0,
+  0,
+  0,
+  0,
+  0,
+  3,
+  3,
+  0,
+  0,
+  0,
+  0,
+  0,
+  3,
+  3,
+)
+
+G1_UAN_ACTUATOR_GROUP_PATTERNS = (
+  G1_ACTUATOR_5020.target_names_expr,
+  G1_ACTUATOR_7520_14.target_names_expr,
+  G1_ACTUATOR_7520_22.target_names_expr,
+  G1_ACTUATOR_4010.target_names_expr,
+  G1_ACTUATOR_WAIST.target_names_expr + G1_ACTUATOR_ANKLE.target_names_expr,
+)
+
+
+def build_g1_joint_to_actuator_map(
+  joint_names: Sequence[str],
+  num_actuators: int,
+) -> tuple[list[int], str, tuple[str, ...]]:
+  """Build the five actuator-family groups used by Contact-UAN."""
+  joint_names = tuple(joint_names)
+  if len(joint_names) != 29:
+    raise ValueError(f"Expected 29 G1 joints, got {len(joint_names)}: {joint_names}")
+  if num_actuators != 5:
+    raise ValueError("Contact-UAN requires five actuator-family networks.")
+
+  joint_to_group: list[int] = []
+  unmatched: list[str] = []
+  ambiguous: list[tuple[str, list[int]]] = []
+  for joint_name in joint_names:
+    matches = [
+      group_idx
+      for group_idx, patterns in enumerate(G1_UAN_ACTUATOR_GROUP_PATTERNS)
+      if any(re.fullmatch(pattern, joint_name) for pattern in patterns)
+    ]
+    if len(matches) == 1:
+      joint_to_group.append(matches[0])
+    elif len(matches) == 0:
+      unmatched.append(joint_name)
+      joint_to_group.append(-1)
+    else:
+      ambiguous.append((joint_name, matches))
+      joint_to_group.append(matches[0])
+
+  if unmatched or ambiguous:
+    raise ValueError(
+      "Failed to build 5-group G1 joint_to_actuator_map. "
+      f"unmatched={unmatched}, ambiguous={ambiguous}"
+    )
+
+  group_ids = set(joint_to_group)
+  expected_ids = set(range(5))
+  if group_ids != expected_ids:
+    raise ValueError(
+      f"Expected all 5 actuator groups to be used, got {sorted(group_ids)}"
+    )
+
+  return joint_to_group, "g1_actuator_family_5", G1_UAN_ACTUATOR_GROUP_NAMES
+
 
 ##
 # Keyframe config.
@@ -262,11 +408,7 @@ G1_ARTICULATION = EntityArticulationInfoCfg(
 
 
 def get_g1_robot_cfg() -> EntityCfg:
-  """Get a fresh G1 robot configuration instance.
-
-  Returns a new EntityCfg instance each time to avoid mutation issues when
-  the config is shared across multiple places.
-  """
+  """Get a fresh G1 robot configuration instance (upright pose)."""
   return EntityCfg(
     init_state=KNEES_BENT_KEYFRAME,
     collisions=(FULL_COLLISION,),

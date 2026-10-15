@@ -13,7 +13,7 @@ mkdir -p ~/.config/systemd/user
 cp mjlab-nightly.service ~/.config/systemd/user/
 cp mjlab-nightly.timer ~/.config/systemd/user/
 
-# 3. Edit the service file to set your WANDB_API_KEY
+# 3. Replace /path/to/mjlab with your checkout and set your WANDB_API_KEY
 #    Get your key from: https://wandb.ai/authorize
 nano ~/.config/systemd/user/mjlab-nightly.service
 
@@ -54,6 +54,7 @@ systemctl --user disable mjlab-nightly.timer
 
 Edit `~/.config/systemd/user/mjlab-nightly.service` to customize:
 
+- `WorkingDirectory` and `ExecStart` - Absolute path to your checkout
 - `Environment="CUDA_DEVICE=0"` - Which GPU to use
 - `Environment="WANDB_API_KEY=..."` - Your WandB API key
 - `MemoryMax=32G` - Memory limit for the training job

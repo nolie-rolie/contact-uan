@@ -21,9 +21,20 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
     device: str = "cpu",
   ) -> None:
     # Strip None-valued optional configs so MLPModel doesn't receive them.
+    optional_model_cfgs = (
+      "cnn_cfg",
+      "distribution_cfg",
+      "num_actuators",
+      "joint_to_actuator_map",
+      "history_length",
+      "num_blocks",
+      "use_bias",
+      "final_layer_init_uniform",
+      "final_layer_bias_zero",
+    )
     for key in ("actor", "critic"):
       if key in train_cfg:
-        for opt in ("cnn_cfg", "distribution_cfg"):
+        for opt in optional_model_cfgs:
           if train_cfg[key].get(opt) is None:
             train_cfg[key].pop(opt, None)
         if train_cfg[key].get("rnn_type") is None:

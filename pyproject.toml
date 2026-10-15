@@ -37,8 +37,8 @@ dependencies = [
   "torch>=2.7.0",
   "torchrunx>=0.3.4",
   "warp-lang>=1.12.0",
-  "mujoco-warp>=3.8.0.3,~=3.8.0",
-  "mujoco~=3.8.0",
+  "mujoco-warp==3.8.0.2",
+  "mujoco==3.8.0",
   "trimesh>=4.8.3",
   "scipy>=1.15",
   "viser>=1.0.27",
@@ -50,6 +50,7 @@ dependencies = [
   "tensorboard>=2.20.0",
   "onnxscript>=0.5.4",
   "wandb>=0.22.3",
+  "pandas>=2.3.3",
 ]
 
 [project.urls]
@@ -93,15 +94,14 @@ docs = [
 [project.optional-dependencies]
 cu128 = ["torch>=2.7.0"]
 cpu = ["torch>=2.7.0"]
+deploy = ["lcm==1.5.2"]
 
 [tool.uv]
 conflicts = [
   [{extra = "cu128"}, {extra = "cpu"}],
 ]
-# The nightly index (py.mujoco.org) only has dev builds, and PEP 440 ranks
-# 3.8.0.devN < 3.8.0, so the ~=3.8.0 floor in [project.dependencies] would
-# reject them. This override loosens the constraint for uv resolution only.
-override-dependencies = ["mujoco>=3.8.0.dev0"]
+# Resolve the pinned Warp revision's nightly source through the published release.
+override-dependencies = ["mujoco==3.8.0"]
 constraint-dependencies = [
   "GitPython>=3.1.49",
   "lxml>=6.1.0",
@@ -112,6 +112,7 @@ required-environments = [
 ]
 
 [[tool.uv.index]]
+name = "pypi"
 url = "https://pypi.org/simple"
 
 [[tool.uv.index]]
@@ -129,18 +130,13 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
-[[tool.uv.index]]
-name = "mujoco"
-url = "https://py.mujoco.org"
-explicit = true
-
 [tool.uv.sources]
+mujoco = { index = "pypi" }
 warp-lang = { index = "nvidia", marker = "sys_platform != 'darwin'" }
 torch = [
   { index = "pytorch-cu128", extra = "cu128", marker = "sys_platform != 'darwin'" },
   { index = "pytorch-cpu", extra = "cpu", marker = "sys_platform != 'darwin'" },
 ]
-mujoco = { index = "mujoco" }
 mujoco-warp = { git = "https://github.com/google-deepmind/mujoco_warp", rev = "88b55fc2696960b927bc12584994bb8412b36558" }
 
 [tool.ruff]
@@ -170,6 +166,7 @@ include = ["src", "tests"]
 exclude = ["src/mjlab/utils/lab_api", "typings"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = [
   "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]

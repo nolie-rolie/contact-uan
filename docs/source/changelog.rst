@@ -8,22 +8,94 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added fixed-objective G1 ``JumpingHeight`` baseline and frozen-UAN tasks for
+  fine-tuning JumpingTrack policies with full-motion reference tracking, a
+  one-shot mass-weighted whole-body COM ballistic-rise bonus per
+  reference-motion segment, takeoff and apex diagnostics, and low-height and
+  excessive-tilt fall terminations.
+- Added a 161-dimensional G1 ``JumpingTrack`` deployment controller and
+  reusable reference sensors for policies trained and exported by the user.
+- Added torque-speed-clipped G1 ``JumpingTrack`` baseline and frozen-UAN
+  tasks with reference height, projected gravity, joint state, and base velocity
+  observations.
+- Added jumping pretraining, checkpoint continuation, fine-tuning, export,
+  and local simulation instructions to the sim-to-real pipeline guide.
 - Added ``BuiltinDcMotorActuator``, a native MuJoCo ``<dcmotor>`` wrapper.
   Supports voltage / position / velocity input modes with back-EMF,
   configurable motor constants, and optional integral, slew, inductance,
   thermal, LuGre, and cogging extensions.
+- Added a hardware pipeline guide and flattened deployment reference.
+- Added velocity-training and stance/root-height evaluation utilities for
+  custom G1 rollout diagnostics.
 
 Changed
 ^^^^^^^
 
+- Focused the source release on WTW data collection, the paper's separate
+  estimators and shared-actuator UAN, and downstream running, force-control,
+  and jumping policies. Retained pipeline diagnostics and deployment
+  verification, and streamlined the accompanying documentation and assets.
+- Standardized state estimation on the paper's six separate networks and
+  three-frame proprioceptive histories. The default training command trains
+  the full set; individual components can be retrained independently. Validate
+  all six exported models before hardware-data relabeling.
+- Require user-supplied policy and UAN replay-data paths, and remove
+  workstation-specific SDK paths and service-template defaults.
+- Simplified the release guides around data collection, estimator and UAN
+  training, baseline and UAN downstream policies, and deployment. Set jumping
+  recipes to 16,384 parallel environments.
+- Set the UAN replay default and training recipe to a residual-output limit of
+  1.0 rad.
+- Unified running/jumping training and the shared deployment controller on the
+  asymmetric torque-speed envelope, clipping both target bounds once
+  per policy step. Motoring torque decreases to zero at the no-load speed while
+  full braking torque remains available. Existing checkpoints use the updated
+  limiter when deployed with this version. Frozen UAN residuals follow
+  nominal-target clipping.
+- Set the jumping ballistic-rise reward weight to 5.0 in both the default
+  configuration and guide.
+- Clarified contact-threshold CLI descriptions and deployment setup instructions.
+- Consolidated jumping into ``jumping_track`` and ``jumping_height``: G1
+  tracking variants share one configuration package, and height fine-tuning
+  inherits tracking with a shared PPO configuration and its own MDP helpers.
+  The guide now uses explicit pretraining and fine-tuning run labels.
+- Training, estimation, and deployment use user-supplied checkpoints and
+  explicit policy and output paths.
+- Replaced inherited publishing instructions with a source-release checklist
+  and removed upstream publishing and automation workflows.
 - Bumped ``rsl-rl-lib`` from 5.2.0 to 5.4.0.
 - Curriculum-mode terrain difficulty is now deterministic across rows
   and reaches the configured ``difficulty_range`` endpoints
   (:issue:`1027`).
+- WTW deployment/export now defaults to MuJoCo joint order, matching the
+  other flattened release deploy scripts.
+- Estimator data collection now enforces plane terrain for the 20-second,
+  4096-environment WTW collection budget used by the sim-to-real guide.
+- Training log directories now include Slurm job IDs when available.
+- Canonicalized public Unitree G1 task names for force-control and WTW training.
 
 Fixed
 ^^^^^
 
+- Replaced the unavailable MuJoCo nightly with published MuJoCo 3.8.0 while
+  retaining the pinned compatible MuJoCo Warp revision.
+- Added the optional ``deploy`` LCM dependency and missing generated arm-action
+  message binding, with offline installation and bridge-build instructions.
+- Preserve saved stall-torque and no-load-speed overrides during deployment,
+  including scalar and joint-regex values, with independent per-policy settings.
+- Match the LCM bridge's fixed PD gains to nominal training gains at wire
+  precision and reject incompatible policy gains before connecting. The bridge
+  must be rebuilt from the same source revision.
+- Reject unsupported Isaac Lab joint-order export for JumpingTrack before
+  loading a checkpoint, preventing an incorrectly permuted policy export.
+- Made repository-root deployment modules importable when running ``pytest``
+  directly, as used by the release checks.
+- Fixed G1 ``JumpingTrack`` and inherited ``JumpingHeight`` policies omitting
+  measured robot projected gravity. The corrected actor and critic observation
+  dimensions are 161 and 299.
+- Fixed stance-geometry hardware relabeling omitting termination markers at
+  boundaries between independently collected rollouts.
+- Fixed resumed training loading CUDA-saved checkpoints on CPU-only devices.
 - Fixed ``select_gpus`` crashing when ``CUDA_VISIBLE_DEVICES`` contains MIG UUIDs instead of numeric indices.
 
 Version 1.4.0 (May 26, 2026)
