@@ -1,6 +1,8 @@
-from deploy.sensors.base_sensor import BaseSensor
-import numpy as np
 import math
+
+import numpy as np
+
+from deploy.sensors.base_sensor import BaseSensor
 
 
 class GaitPhaseSensor(BaseSensor):

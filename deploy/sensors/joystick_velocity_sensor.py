@@ -1,5 +1,6 @@
-from deploy.sensors.base_sensor import BaseSensor
 import numpy as np
+
+from deploy.sensors.base_sensor import BaseSensor
 
 
 def map_normalized_velocity_commands_to_range(

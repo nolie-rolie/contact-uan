@@ -1,4 +1,5 @@
 import time
+
 import numpy as np
 
 
@@ -9,8 +10,8 @@ class MujocoJoystick:
     self.mode = 0
     self.ctrlmode_left = 0
     self.ctrlmode_right = 0
-    self.left_stick = [0, 0]
-    self.right_stick = [0, 0]
+    self.left_stick: list[float] = [0, 0]
+    self.right_stick: list[float] = [0, 0]
     self.force_command = [0.0, 0.0, 0.0]
     self.left_upper_switch = 0
     self.left_lower_left_switch = 0

@@ -31,6 +31,8 @@ Added
 Changed
 ^^^^^^^
 
+- Configure lint and type checks for the deployment dependencies and generated
+  LCM bindings, and correct type annotations without changing pipeline behavior.
 - Focused the source release on WTW data collection, the paper's separate
   estimators and shared-actuator UAN, and downstream running, force-control,
   and jumping policies. Retained pipeline diagnostics and deployment

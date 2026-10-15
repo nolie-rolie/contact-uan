@@ -40,7 +40,7 @@ import signal
 import threading
 import time
 import traceback
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -176,7 +176,9 @@ class DataCollector:
     Returns:
         extension_15 (np.ndarray, shape (15,))
     """
-    fk = self.kinematics.compute(joint_pos_hw, base_height, dt=self.control_dt)
+    fk = cast(G1KinematicsHelper, self.kinematics).compute(
+      joint_pos_hw, base_height, dt=self.control_dt
+    )
     ext = np.zeros(_EXTENSION_DIM)
     ext[0:2] = fk["foot_heights"]  # L, R foot z
     ext[2:4] = fk["foot_z_vel"]  # L, R foot z-velocity

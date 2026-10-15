@@ -76,7 +76,7 @@ jobs:
           enable-cache: true
           version: "0.9.27"
       - name: Test with python ${{ matrix.python-version }}
-        run: uv run --extra cpu pyright
+        run: uv run --extra cpu --extra deploy pyright
 
   ty-check:
     runs-on: ubuntu-latest
