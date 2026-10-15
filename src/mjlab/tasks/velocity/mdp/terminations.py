@@ -14,6 +14,16 @@ if TYPE_CHECKING:
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
+def low_height(
+  env: ManagerBasedRlEnv,
+  minimum_height: float = 0.3,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Terminate when the robot root drops below a fixed height."""
+  asset: Entity = env.scene[asset_cfg.name]
+  return asset.data.root_link_pos_w[:, 2] < minimum_height
+
+
 def illegal_contact(
   env: ManagerBasedRlEnv,
   sensor_name: str,
@@ -47,7 +57,7 @@ def out_of_terrain_bounds(
     )
 
   terrain_generator = terrain.cfg.terrain_generator
-  if terrain_generator is None or terrain.terrain_origins is None:
+  if terrain_generator is None:
     return torch.zeros(
       (env.num_envs,),
       device=env.device,
@@ -57,11 +67,17 @@ def out_of_terrain_bounds(
   asset: Entity = env.scene[asset_cfg.name]
   root_xy_w = asset.data.root_link_pos_w[:, :2]
 
-  # Use the generated grid shape (curriculum mode overrides cfg.num_cols with
-  # len(sub_terrains)), and include the flat border around the patch grid.
-  num_rows, num_cols = terrain.terrain_origins.shape[:2]
-  half_x = 0.5 * (num_rows * terrain_generator.size[0]) + terrain_generator.border_width
-  half_y = 0.5 * (num_cols * terrain_generator.size[1]) + terrain_generator.border_width
+  terrain_origins = getattr(terrain, "terrain_origins", None)
+  if terrain_origins is not None:
+    num_rows = terrain_origins.shape[0]
+    num_cols = terrain_origins.shape[1]
+  else:
+    num_rows = terrain_generator.num_rows
+    num_cols = terrain_generator.num_cols
+
+  border_width = float(getattr(terrain_generator, "border_width", 0.0))
+  half_x = 0.5 * (num_rows * terrain_generator.size[0]) + border_width
+  half_y = 0.5 * (num_cols * terrain_generator.size[1]) + border_width
   limit_x = max(0.0, half_x - margin)
   limit_y = max(0.0, half_y - margin)
 

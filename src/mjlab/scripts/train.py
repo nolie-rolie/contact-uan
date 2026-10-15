@@ -3,18 +3,23 @@
 import logging
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, cast
 
+import torch
 import tyro
 
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
-from mjlab.scripts._cli import maybe_print_top_level_help
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.tasks.uan.uan_rollout_env_cfg import (
+  sync_uan_rollout_actor_layout,
+  sync_uan_rollout_config_from_checkpoint_metadata,
+)
 from mjlab.utils.gpu import select_gpus
 from mjlab.utils.os import dump_yaml, get_checkpoint_path, get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
@@ -27,12 +32,10 @@ class TrainConfig:
   env: ManagerBasedRlEnvCfg
   agent: RslRlBaseRunnerCfg
   registry_name: str | None = None
-  video: bool = False
+  video: bool = True
   video_length: int = 200
-  video_interval: int = 2000
+  video_interval: int = 12000
   enable_nan_guard: bool = False
-  log_root: str = "logs/rsl_rl"
-  """Root directory under which experiment logs are written."""
   torchrunx_log_dir: str | None = None
   wandb_run_path: str | None = None
   wandb_checkpoint_name: str | None = None
@@ -59,7 +62,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     os.environ["MUJOCO_EGL_DEVICE_ID"] = str(local_rank)
     device = f"cuda:{local_rank}"
     # Set seed to have diversity in different processes.
-    seed = cfg.agent.seed + rank
+    seed = cfg.agent.seed + local_rank
 
   configure_torch_backends()
 
@@ -107,10 +110,6 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   if rank == 0:
     print(f"[INFO] Logging experiment in directory: {log_dir}")
 
-  env = ManagerBasedRlEnv(
-    cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
-  )
-
   log_root_path = log_dir.parent  # Go up from specific run dir to experiment dir.
 
   resume_path: Path | None = None
@@ -134,14 +133,52 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         log_root_path, cfg.agent.load_run, cfg.agent.load_checkpoint
       )
 
+  if resume_path is not None:
+    checkpoint_metadata = torch.load(
+      str(resume_path), map_location="cpu", weights_only=False
+    )
+    if isinstance(checkpoint_metadata, dict):
+      sync_uan_rollout_config_from_checkpoint_metadata(
+        env_cfg=cfg.env,
+        agent_cfg=cfg.agent,
+        checkpoint_metadata=checkpoint_metadata,
+      )
+  else:
+    sync_uan_rollout_actor_layout(cfg.env)
+
+  actor_block_names_attr = getattr(cfg.env, "actor_obs_block_names", None)
+  actor_block_names = (
+    cast(Callable[[], tuple[str, ...]], actor_block_names_attr)
+    if callable(actor_block_names_attr)
+    else None
+  )
+  actor_cfg = getattr(cfg.agent, "actor", None)
+  if actor_block_names is not None and actor_cfg is not None:
+    if hasattr(actor_cfg, "num_blocks"):
+      actor_cfg.num_blocks = len(actor_block_names())
+  env = ManagerBasedRlEnv(
+    cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
+  )
+
   # Only record videos on rank 0 to avoid multiple workers writing to the same files.
   if cfg.video and rank == 0:
+
+    def _log_video_to_wandb(video_path: Path) -> None:
+      try:
+        import wandb
+
+        if wandb.run is not None:
+          wandb.log({"train/video": wandb.Video(str(video_path), format="mp4")})
+      except ImportError:
+        pass
+
     env = VideoRecorder(
       env,
       video_folder=Path(log_dir) / "videos" / "train",
       step_trigger=lambda step: step % cfg.video_interval == 0,
       video_length=cfg.video_length,
       disable_logger=True,
+      on_video_saved=_log_video_to_wandb if cfg.agent.logger == "wandb" else None,
     )
     print("[INFO] Recording videos during training.")
 
@@ -170,7 +207,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   runner.add_git_repo_to_log(__file__)
   if resume_path is not None:
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    runner.load(str(resume_path))
+    runner.load(str(resume_path), map_location=device)
 
   runner.learn(
     num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
@@ -183,10 +220,19 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
   args = args or TrainConfig.from_task(task_id)
 
   # Create log directory once before launching workers.
-  log_root_path = (Path(args.log_root) / args.agent.experiment_name).resolve()
-  log_dir_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+  log_root_path = Path("logs") / "rsl_rl" / args.agent.experiment_name
+  log_root_path.resolve()
+  log_dir_parts = [datetime.now().strftime("%Y-%m-%d_%H-%M-%S")]
+  slurm_array_job_id = os.environ.get("SLURM_ARRAY_JOB_ID")
+  slurm_array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
+  slurm_job_id = os.environ.get("SLURM_JOB_ID")
+  if slurm_array_job_id is not None and slurm_array_task_id is not None:
+    log_dir_parts.append(f"slurm{slurm_array_job_id}_{slurm_array_task_id}")
+  elif slurm_job_id is not None:
+    log_dir_parts.append(f"slurm{slurm_job_id}")
   if args.agent.run_name:
-    log_dir_name += f"_{args.agent.run_name}"
+    log_dir_parts.append(args.agent.run_name)
+  log_dir_name = "_".join(log_dir_parts)
   log_dir = log_root_path / log_dir_name
 
   # Select GPUs based on CUDA_VISIBLE_DEVICES and user specification.
@@ -229,8 +275,6 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
 
 
 def main():
-  maybe_print_top_level_help("train")
-
   # Parse first argument to choose the task.
   # Import tasks to populate the registry.
   import mjlab.tasks  # noqa: F401

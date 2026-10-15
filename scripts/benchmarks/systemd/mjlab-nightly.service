@@ -18,13 +18,13 @@ Wants=network-online.target
 Type=oneshot
 
 # Update these paths to match your setup
-Environment="PATH=/home/kevin/.local/bin:/home/kevin/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="HOME=/home/kevin"
+Environment="PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=%h"
 Environment="CUDA_DEVICE=0"
 Environment="WANDB_API_KEY="
 
-WorkingDirectory=/home/kevin/dev/mjlab
-ExecStart=/home/kevin/dev/mjlab/scripts/benchmarks/nightly_train.sh
+WorkingDirectory=/path/to/mjlab
+ExecStart=/path/to/mjlab/scripts/benchmarks/nightly_train.sh
 
 # Logging
 StandardOutput=journal

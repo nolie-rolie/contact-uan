@@ -4,10 +4,12 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
 from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
 
 if TYPE_CHECKING:
+  from mjlab.entity import Entity
   from mjlab.envs import ManagerBasedRlEnv
 
 
@@ -45,3 +47,22 @@ def foot_contact_forces(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tenso
   assert sensor_data.force is not None
   forces_flat = sensor_data.force.flatten(start_dim=1)  # [B, N*3]
   return torch.sign(forces_flat) * torch.log1p(torch.abs(forces_flat))
+
+
+def foot_contact_force_magnitude(
+  env: ManagerBasedRlEnv, sensor_name: str
+) -> torch.Tensor:
+  """Net contact force magnitude per foot. Shape (num_envs, num_feet)."""
+  sensor: ContactSensor = env.scene[sensor_name]
+  sensor_data = sensor.data
+  assert sensor_data.force is not None
+  return sensor_data.force.norm(dim=-1)  # [B, N]
+
+
+def foot_velocities(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+  """Foot body linear velocities in world frame. Shape (num_envs, N*3)."""
+  asset: Entity = env.scene[asset_cfg.name]
+  return asset.data.body_link_lin_vel_w[:, asset_cfg.body_ids].flatten(start_dim=1)

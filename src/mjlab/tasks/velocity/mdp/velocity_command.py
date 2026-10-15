@@ -22,6 +22,24 @@ if TYPE_CHECKING:
   from mjlab.viewer.debug_visualizer import DebugVisualizer
 
 
+def _sample_special_mode_masks(
+  random_values: torch.Tensor,
+  *,
+  rel_standing_envs: float,
+  rel_forward_envs: float,
+  rel_turn_envs: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+  """Partition envs into exclusive standing / forward / turn mode slices."""
+  standing_cutoff = rel_standing_envs
+  forward_cutoff = standing_cutoff + rel_forward_envs
+  turn_cutoff = forward_cutoff + rel_turn_envs
+
+  is_standing = random_values < standing_cutoff
+  is_forward = (random_values >= standing_cutoff) & (random_values < forward_cutoff)
+  is_turn = (random_values >= forward_cutoff) & (random_values < turn_cutoff)
+  return is_standing, is_forward, is_turn
+
+
 class UniformVelocityCommand(CommandTerm):
   cfg: UniformVelocityCommandCfg
 
@@ -45,6 +63,7 @@ class UniformVelocityCommand(CommandTerm):
     self.is_standing_env = torch.zeros_like(self.is_heading_env)
     self.is_world_env = torch.zeros_like(self.is_heading_env)
     self.is_forward_env = torch.zeros_like(self.is_heading_env)
+    self.is_turn_env = torch.zeros_like(self.is_heading_env)
 
     self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
@@ -81,15 +100,26 @@ class UniformVelocityCommand(CommandTerm):
       assert self.cfg.ranges.heading is not None
       self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
       self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
-    self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
 
     # Randomly assign world-frame envs.
     self.is_world_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_world_envs
     # Copy sampled velocities as world-frame reference for world envs.
     self.vel_command_w[env_ids] = self.vel_command_b[env_ids]
 
+    # Sample special command modes as mutually exclusive absolute fractions.
+    mode_draw = r.uniform_(0.0, 1.0)
+    (
+      self.is_standing_env[env_ids],
+      self.is_forward_env[env_ids],
+      self.is_turn_env[env_ids],
+    ) = _sample_special_mode_masks(
+      mode_draw,
+      rel_standing_envs=self.cfg.rel_standing_envs,
+      rel_forward_envs=self.cfg.rel_forward_envs,
+      rel_turn_envs=self.cfg.rel_turn_envs,
+    )
+
     # Forward-only envs: positive lin_vel_x, zero lateral and angular.
-    self.is_forward_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_forward_envs
     fwd_ids = env_ids[self.is_forward_env[env_ids]]
     if len(fwd_ids) > 0:
       self.vel_command_b[fwd_ids, 0] = (
@@ -132,6 +162,12 @@ class UniformVelocityCommand(CommandTerm):
       vy_w = self.vel_command_w[w_ids, 1]
       self.vel_command_b[w_ids, 0] = cos_h * vx_w + sin_h * vy_w
       self.vel_command_b[w_ids, 1] = -sin_h * vx_w + cos_h * vy_w
+
+    turn_env_ids = self.is_turn_env.nonzero(as_tuple=False).flatten()
+    self.vel_command_b[turn_env_ids, 0] = 0.0
+    self.vel_command_b[turn_env_ids, 1] = 0.0
+    self.vel_command_w[turn_env_ids, 0] = 0.0
+    self.vel_command_w[turn_env_ids, 1] = 0.0
 
     standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
     self.vel_command_b[standing_env_ids, :] = 0.0
@@ -283,15 +319,19 @@ class UniformVelocityCommandCfg(CommandTermCfg):
   heading_command: bool = False
   heading_control_stiffness: float = 1.0
   rel_standing_envs: float = 0.0
+  """Exclusive fraction of environments that receive zero-velocity standing commands."""
   rel_heading_envs: float = 1.0
   rel_world_envs: float = 0.0
   """Fraction of environments that use world-frame velocity commands.
   World-frame envs sample linear velocity in world frame and rotate to body
   frame each step, so the command direction stays fixed in the world."""
   rel_forward_envs: float = 0.0
-  """Fraction of environments that receive forward-only commands (positive
-  lin_vel_x, zero lin_vel_y and ang_vel_z). Increases training coverage for
-  straight-line walking, which is important for stair climbing."""
+  """Exclusive fraction of environments that receive forward-only commands.
+
+  Forward envs get positive lin_vel_x with zero lin_vel_y and ang_vel_z.
+  """
+  rel_turn_envs: float = 0.0
+  """Exclusive fraction of environments that receive turn-in-place commands."""
   init_velocity_prob: float = 0.0
 
   @dataclass
@@ -318,4 +358,19 @@ class UniformVelocityCommandCfg(CommandTermCfg):
       raise ValueError(
         "The velocity command has heading commands active (heading_command=True) but "
         "the `ranges.heading` parameter is set to None."
+      )
+    for name, value in (
+      ("rel_standing_envs", self.rel_standing_envs),
+      ("rel_forward_envs", self.rel_forward_envs),
+      ("rel_turn_envs", self.rel_turn_envs),
+    ):
+      if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be in [0, 1], got {value}")
+    special_mode_total = (
+      self.rel_standing_envs + self.rel_forward_envs + self.rel_turn_envs
+    )
+    if special_mode_total > 1.0 + 1e-6:
+      raise ValueError(
+        "rel_standing_envs + rel_forward_envs + rel_turn_envs must be <= 1.0, "
+        f"got {special_mode_total:.3f}"
       )

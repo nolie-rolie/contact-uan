@@ -64,6 +64,39 @@ def track_angular_velocity(
   return torch.exp(-ang_vel_error / std**2)
 
 
+def track_angular_velocity_z(
+  env: ManagerBasedRlEnv,
+  std: float,
+  command_name: str,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward tracking only the commanded yaw angular velocity."""
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  actual = asset.data.root_link_ang_vel_b
+  z_error = torch.square(command[:, 2] - actual[:, 2])
+  return torch.exp(-z_error / std**2)
+
+
+def command_scaled_action_rate_l2(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  alpha: float = 1.0,
+) -> torch.Tensor:
+  """Penalize action-rate changes less aggressively at larger command magnitudes.
+
+  Smaller ``alpha`` values make the scale drop off more slowly as command magnitude
+  increases.
+  """
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  action_delta = env.action_manager.action - env.action_manager.prev_action
+  base_penalty = torch.sum(torch.square(action_delta), dim=1)
+  command_scale = 1.0 / (alpha * torch.linalg.vector_norm(command, dim=1) + 1.0)
+  return base_penalty * command_scale
+
+
 class upright:
   """Reward for keeping the base upright.
 
@@ -382,6 +415,47 @@ def soft_landing(
   return cost
 
 
+def heel_contact_flat(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Penalize foot pitch at landing to discourage heel striking."""
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  first_contact = contact_sensor.compute_first_contact(dt=env.step_dt)  # [B, N]
+
+  asset: Entity = env.scene[asset_cfg.name]
+  body_quat_w = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]  # [B, N, 4]
+  local_x = torch.zeros(*body_quat_w.shape[:-1], 3, device=env.device)
+  local_x[..., 0] = 1.0
+  foot_forward_w = quat_apply(body_quat_w, local_x)  # [B, N, 3]
+  pitch_sin = torch.abs(foot_forward_w[..., 2])  # [B, N]
+  landing_mask = first_contact.float()
+  cost = torch.sum(pitch_sin * landing_mask, dim=-1)  # [B]
+
+  num_landings = torch.sum(landing_mask)
+  mean_strike_angle = torch.sum(pitch_sin * landing_mask) / torch.clamp(
+    num_landings, min=1
+  )
+  angle_rad = torch.asin(torch.clamp(pitch_sin, max=1.0))
+  mean_strike_angle_rad = torch.sum(angle_rad * landing_mask) / torch.clamp(
+    num_landings, min=1
+  )
+  env.extras["log"]["Metrics/foot_strike_angle_mean"] = mean_strike_angle
+  env.extras["log"]["Metrics/heel_strike_angle_rad_mean"] = mean_strike_angle_rad
+  env.extras["log"]["Metrics/heel_strike_count"] = num_landings
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      active = (command[:, 0] > command_threshold).float()
+      cost = cost * active
+
+  return cost
+
+
 class variable_posture:
   """Penalize deviation from default pose with speed-dependent tolerance.
 
@@ -393,6 +467,8 @@ class variable_posture:
     - std_standing (speed < walking_threshold): Tight tolerance for holding pose.
     - std_walking (walking_threshold <= speed < running_threshold): Moderate.
     - std_running (speed >= running_threshold): Loose tolerance for large motion.
+    - std_fast_running (speed >= fast_running_threshold): Optional extra-loose
+      tolerance for very fast commands.
 
   Tune std values per joint based on how much motion that joint needs at each
   speed. Map joint name patterns to std values, e.g. {".*knee.*": 0.35}.
@@ -426,6 +502,20 @@ class variable_posture:
     )
     self.std_running = torch.tensor(std_running, device=env.device, dtype=torch.float32)
 
+    std_fast_running_cfg = cfg.params.get("std_fast_running")
+    if std_fast_running_cfg is None:
+      self.std_fast_running = self.std_running
+      self.has_fast_running = False
+    else:
+      _, _, std_fast_running = resolve_matching_names_values(
+        data=std_fast_running_cfg,
+        list_of_strings=joint_names,
+      )
+      self.std_fast_running = torch.tensor(
+        std_fast_running, device=env.device, dtype=torch.float32
+      )
+      self.has_fast_running = True
+
   def __call__(
     self,
     env: ManagerBasedRlEnv,
@@ -436,8 +526,10 @@ class variable_posture:
     command_name: str,
     walking_threshold: float = 0.5,
     running_threshold: float = 1.5,
+    std_fast_running=None,
+    fast_running_threshold: float | None = None,
   ) -> torch.Tensor:
-    del std_standing, std_walking, std_running  # Unused.
+    del std_standing, std_walking, std_running, std_fast_running  # Unused.
 
     asset: Entity = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
@@ -447,16 +539,28 @@ class variable_posture:
     angular_speed = torch.abs(command[:, 2])
     total_speed = linear_speed + angular_speed
 
-    standing_mask = (total_speed < walking_threshold).float()
-    walking_mask = (
-      (total_speed >= walking_threshold) & (total_speed < running_threshold)
-    ).float()
-    running_mask = (total_speed >= running_threshold).float()
+    if self.has_fast_running and fast_running_threshold is not None:
+      standing_mask = (total_speed < walking_threshold).float()
+      walking_mask = (
+        (total_speed >= walking_threshold) & (total_speed < running_threshold)
+      ).float()
+      running_mask = (
+        (total_speed >= running_threshold) & (total_speed < fast_running_threshold)
+      ).float()
+      fast_running_mask = (total_speed >= fast_running_threshold).float()
+    else:
+      standing_mask = (total_speed < walking_threshold).float()
+      walking_mask = (
+        (total_speed >= walking_threshold) & (total_speed < running_threshold)
+      ).float()
+      running_mask = (total_speed >= running_threshold).float()
+      fast_running_mask = torch.zeros_like(running_mask)
 
     std = (
       self.std_standing * standing_mask.unsqueeze(1)
       + self.std_walking * walking_mask.unsqueeze(1)
       + self.std_running * running_mask.unsqueeze(1)
+      + self.std_fast_running * fast_running_mask.unsqueeze(1)
     )
 
     current_joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
